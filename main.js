@@ -267,73 +267,31 @@ function setupUploadZone(zone, input, handler, multiple = false) {
 }
 
 // =====================================================
-// CAMERA FUNCTIONS (Low Resolution)
+// CAMERA FUNCTIONS (Capacitor Native)
 // =====================================================
-let cameraStream = null;
 let currentCameraMode = 'traccia'; // 'traccia' o 'compiti'
 
-// Rendi le funzioni disponibili globalmente per i pulsanti HTML
+// Funzione per aprire la fotocamera nativa usando Capacitor
 window.openCamera = async function (mode) {
     currentCameraMode = mode || 'traccia';
     try {
-        const constraints = {
-            video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 640 }, // Risoluzione bassa per evitare crash memoria
-                height: { ideal: 480 }
-            },
-            audio: false
-        };
+        // Usa Capacitor Camera per aprire la fotocamera nativa
+        const image = await Camera.getPhoto({
+            quality: 80,
+            width: 1024,
+            height: 1024,
+            resultType: CameraResultType.Base64,
+            source: CameraSource.Camera,  // Forza fotocamera, non galleria
+            saveToGallery: false
+        });
 
-        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-        const video = document.getElementById('cameraVideo');
-        const modal = document.getElementById('cameraModal');
+        const base64 = image.base64String;
+        const dataUrl = `data:image/jpeg;base64,${base64}`;
 
-        if (video) video.srcObject = cameraStream;
-        if (modal) modal.classList.remove('hidden');
-
-    } catch (error) {
-        console.error('Errore apertura camera:', error);
-        showToast('Errore apertura camera: ' + error.message, 'error');
-    }
-};
-
-window.closeCamera = function () {
-    if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-    }
-    const video = document.getElementById('cameraVideo');
-    const modal = document.getElementById('cameraModal');
-
-    if (video) video.srcObject = null;
-    if (modal) modal.classList.add('hidden');
-};
-
-async function capturePhoto() {
-    const video = document.getElementById('cameraVideo');
-    const canvas = document.getElementById('cameraCanvas');
-
-    if (!video || !canvas) return;
-
-    // Imposta dimensioni canvas conservative
-    canvas.width = 640;
-    canvas.height = 480;
-
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(async (blob) => {
-        if (!blob) {
-            showToast('Errore cattura frame', 'error');
-            window.closeCamera();
-            return;
-        }
-
+        // Crea un file fittizio per riutilizzare le funzioni esistenti
+        const blob = await fetch(dataUrl).then(r => r.blob());
         const fileName = currentCameraMode === 'traccia' ? "traccia_camera.jpg" : "compito_camera.jpg";
         const file = new File([blob], fileName, { type: "image/jpeg" });
-
-        window.closeCamera();
 
         if (currentCameraMode === 'traccia') {
             await handleTracciaUpload(file);
@@ -341,15 +299,23 @@ async function capturePhoto() {
             await handleCompitiUpload(file);
         }
 
-    }, 'image/jpeg', 0.8);
-}
+    } catch (error) {
+        // L'utente ha annullato o c'è stato un errore
+        if (error.message && !error.message.includes('cancelled')) {
+            console.error('Errore fotocamera:', error);
+            showToast('Errore fotocamera: ' + error.message, 'error');
+        }
+        // Se l'utente ha annullato, non mostrare errore
+    }
+};
 
-// Bind manuale degli eventi camera se non gestiti da onclick
-const btnCapture = document.getElementById('captureBtn');
-if (btnCapture) btnCapture.addEventListener('click', capturePhoto);
+// Funzione closeCamera mantenuta per compatibilità ma non più necessaria
+window.closeCamera = function () {
+    // Con Capacitor Camera nativa non serve più chiudere manualmente
+    const modal = document.getElementById('cameraModal');
+    if (modal) modal.classList.add('hidden');
+};
 
-const btnCloseCam = document.getElementById('closeCameraBtn');
-if (btnCloseCam) btnCloseCam.addEventListener('click', window.closeCamera);
 
 // Opzioni di compressione AGGRESSIVE per browser-image-compression
 // Helper per leggere file
