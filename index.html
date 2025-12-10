@@ -215,16 +215,25 @@ Esercizio 3: Calcola l'area di un triangolo con base 8 cm e altezza 5 cm."></tex
                 <!-- I risultati verranno inseriti qui -->
               </div>
 
-              <!-- Sezione Revisione Calcoli -->
+              <!-- Sezione Verifica Correzione -->
               <div class="review-section">
-                <h3>🔍 Verifica Calcoli</h3>
-                <p class="review-hint">Se pensi che la correzione contenga errori, chiedi a Gemini di rivedere i
-                  calcoli:</p>
+                <h3>🔍 Verifica della Correzione</h3>
+                <p class="review-hint">Seleziona lo studente e chiedi a Gemini di rivedere la correzione:</p>
+                <div class="input-group">
+                  <label for="studenteSelect">Studente da verificare</label>
+                  <select id="studenteSelect">
+                    <option value="">-- Seleziona uno studente --</option>
+                  </select>
+                </div>
                 <textarea id="reviewNotes" rows="3"
-                  placeholder="es. Rivedi l'esercizio 2, il risultato sembra sbagliato..."></textarea>
+                  placeholder="es. Rivedi l'esercizio 2, il punteggio sembra troppo basso..."></textarea>
                 <button id="reviewCalcs" class="btn-secondary btn-full">
                   <span class="btn-icon">🔄</span>
-                  Chiedi Revisione a Gemini
+                  Verifica Correzione
+                </button>
+                <button id="reanalyzeFromImage" class="btn-primary btn-full">
+                  <span class="btn-icon">📷</span>
+                  Rivaluta da Immagine
                 </button>
                 <div id="reviewResult" class="review-result hidden"></div>
               </div>

@@ -68,9 +68,11 @@ const elements = {
     exportPdfBtn: document.getElementById('exportPdf'),
     saveToHistoryBtn: document.getElementById('saveToHistory'),
 
-    // Revisione calcoli
+    // Revisione correzione
+    studenteSelect: document.getElementById('studenteSelect'),
     reviewNotes: document.getElementById('reviewNotes'),
     reviewCalcsBtn: document.getElementById('reviewCalcs'),
+    reanalyzeFromImageBtn: document.getElementById('reanalyzeFromImage'),
     reviewResult: document.getElementById('reviewResult'),
 
     // Storico
@@ -156,7 +158,11 @@ function setupEventListeners() {
         elements.stepCompiti.classList.remove('hidden');
         elements.stepCompiti.scrollIntoView({ behavior: 'smooth' });
     });
-    elements.reviewSolutionsBtn.addEventListener('click', handleReviewSolutions);
+    if (elements.reviewSolutionsBtn) {
+        elements.reviewSolutionsBtn.addEventListener('click', handleReviewSolutions);
+    } else {
+        console.error('reviewSolutionsBtn non trovato!');
+    }
 
     // Step 3 - sia da camera che da galleria usano compressione
     elements.compitiCameraInput.addEventListener('change', (e) => {
@@ -174,6 +180,9 @@ function setupEventListeners() {
     elements.exportPdfBtn.addEventListener('click', handleExportPdf);
     elements.saveToHistoryBtn.addEventListener('click', handleSaveToHistory);
     elements.reviewCalcsBtn.addEventListener('click', handleReviewCalcs);
+    if (elements.reanalyzeFromImageBtn) {
+        elements.reanalyzeFromImageBtn.addEventListener('click', handleReanalyzeFromImage);
+    }
 
     // Storico
     elements.filtroMateria.addEventListener('change', filterStorico);
@@ -195,6 +204,52 @@ function switchTab(tabId) {
     if (tabId === 'storico') {
         renderStorico();
     }
+
+    // Reset completo quando si torna a "Nuova Correzione"
+    if (tabId === 'nuova-correzione') {
+        resetNuovaCorrezione();
+    }
+}
+
+// Funzione per resettare tutto e iniziare una nuova correzione
+function resetNuovaCorrezione() {
+    // Reset stato
+    currentSoluzioni = null;
+    currentTraccia = '';
+    currentTitolo = '';
+    currentRisultati = [];
+    currentStudentImages = [];
+
+    // Reset campi input
+    if (elements.tracciaText) elements.tracciaText.value = '';
+    if (elements.titoloInput) elements.titoloInput.value = '';
+    if (elements.tracciaImagePreview) {
+        elements.tracciaImagePreview.innerHTML = '';
+        elements.tracciaImagePreview.classList.add('hidden');
+        elements.tracciaImagePreview.dataset.base64 = '';
+    }
+    if (elements.studenteNome) elements.studenteNome.value = '';
+    if (elements.studenteCognome) elements.studenteCognome.value = '';
+    if (elements.solutionReviewNotes) elements.solutionReviewNotes.value = '';
+    if (elements.solutionReviewResult) elements.solutionReviewResult.classList.add('hidden');
+    if (elements.reviewNotes) elements.reviewNotes.value = '';
+    if (elements.reviewResult) elements.reviewResult.classList.add('hidden');
+
+    // Reset contenitori
+    if (elements.soluzioniContainer) elements.soluzioniContainer.innerHTML = '';
+    if (elements.compitiPreviewGrid) elements.compitiPreviewGrid.innerHTML = '';
+    if (elements.risultatiContainer) elements.risultatiContainer.innerHTML = '';
+
+    // Nascondi step successivi
+    if (elements.stepSoluzioni) elements.stepSoluzioni.classList.add('hidden');
+    if (elements.stepCompiti) elements.stepCompiti.classList.add('hidden');
+    if (elements.stepRisultati) elements.stepRisultati.classList.add('hidden');
+
+    // Reset pulsanti
+    updateGradingButton();
+
+    // Scroll all'inizio
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // =====================================================
@@ -511,6 +566,8 @@ async function handleGenerateSolutions() {
 
 // Funzione per chiedere a Gemini di rivedere le soluzioni
 async function handleReviewSolutions() {
+    console.log('handleReviewSolutions chiamata', { currentApiKey: !!currentApiKey, currentSoluzioni: !!currentSoluzioni });
+
     if (!currentApiKey) {
         showToast('Inserisci prima la API Key Gemini', 'error');
         return;
@@ -522,6 +579,7 @@ async function handleReviewSolutions() {
     }
 
     const notes = elements.solutionReviewNotes.value.trim();
+    const soluzioniOriginali = JSON.stringify(currentSoluzioni);
 
     showLoading('Revisione soluzioni in corso...');
 
@@ -532,44 +590,106 @@ Hai generato queste soluzioni per un compito e ora devi verificare che siano cor
 TRACCIA:
 ${currentTraccia}
 
-SOLUZIONI GENERATE:
+SOLUZIONI ATTUALI:
 ${JSON.stringify(currentSoluzioni, null, 2)}
 
-${notes ? `NOTE SPECIFICHE: ${notes}` : 'Rivedi tutti i calcoli e le soluzioni.'}
+${notes ? `NOTE SPECIFICHE DELL'UTENTE: ${notes}` : 'Rivedi tutti i calcoli e le soluzioni.'}
 
-Analizza attentamente:
-1. Tutti i calcoli sono corretti?
-2. Le soluzioni sono complete?
-3. Ci sono errori o imprecisioni?
+ISTRUZIONI:
+1. Analizza attentamente ogni esercizio e la sua soluzione
+2. Verifica che tutti i calcoli siano corretti
+3. Se trovi errori, CORREGGI le soluzioni
+4. Restituisci le soluzioni (corrette o confermate) in formato JSON
 
-Rispondi in modo chiaro, indicando eventuali errori e le correzioni da apportare.
-Se tutto è corretto, conferma che le soluzioni sono verificate.`;
+IMPORTANTE: Rispondi SOLO con un JSON valido nel seguente formato:
+{
+  "modifiche_effettuate": true/false,
+  "riepilogo": "Descrizione delle modifiche effettuate o conferma che tutto è corretto",
+  "dettaglio_modifiche": ["Modifica 1", "Modifica 2", ...] oppure [] se nessuna modifica,
+  "soluzioni_corrette": { ... le soluzioni nel formato originale, corrette se necessario ... }
+}
+
+Rispondi SOLO con il JSON, senza altri commenti.`;
 
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentApiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+                    generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
                 })
             }
         );
 
         const data = await response.json();
-        const reviewText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Nessuna risposta ricevuta';
+        console.log('Risposta API reviewSolutions:', JSON.stringify(data, null, 2));
 
-        // Mostra il risultato
-        elements.solutionReviewResult.innerHTML = `
-            <h4>📝 Risultato Verifica:</h4>
-            <p>${reviewText.replace(/\n/g, '<br>')}</p>
-        `;
+        if (data.error) {
+            throw new Error(data.error.message || 'Errore API');
+        }
+
+        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        // Estrai il JSON dalla risposta (rimuovi eventuali backtick markdown)
+        let jsonText = responseText.trim();
+        if (jsonText.startsWith('```json')) {
+            jsonText = jsonText.slice(7);
+        }
+        if (jsonText.startsWith('```')) {
+            jsonText = jsonText.slice(3);
+        }
+        if (jsonText.endsWith('```')) {
+            jsonText = jsonText.slice(0, -3);
+        }
+        jsonText = jsonText.trim();
+
+        const risultato = JSON.parse(jsonText);
+
+        // Aggiorna le soluzioni se sono state modificate
+        if (risultato.modifiche_effettuate && risultato.soluzioni_corrette) {
+            currentSoluzioni = risultato.soluzioni_corrette;
+            // Aggiorna anche la visualizzazione delle soluzioni
+            elements.soluzioniContainer.innerHTML = generateSolutionsHTML(currentSoluzioni);
+        }
+
+        // Costruisci il messaggio di riepilogo
+        let htmlRisultato = '';
+        if (risultato.modifiche_effettuate) {
+            htmlRisultato = `
+                <h4>⚠️ Soluzioni Modificate</h4>
+                <p><strong>Riepilogo:</strong> ${risultato.riepilogo}</p>
+                <div class="modifiche-lista">
+                    <strong>Modifiche effettuate:</strong>
+                    <ul>
+                        ${risultato.dettaglio_modifiche.map(m => `<li>${m}</li>`).join('')}
+                    </ul>
+                </div>
+                <p class="success-text">✅ Le soluzioni sono state aggiornate automaticamente!</p>
+            `;
+            showToast('Soluzioni corrette e aggiornate!', 'warning');
+        } else {
+            htmlRisultato = `
+                <h4>✅ Soluzioni Verificate</h4>
+                <p><strong>Riepilogo:</strong> ${risultato.riepilogo}</p>
+                <p class="success-text">Tutte le soluzioni sono corrette, nessuna modifica necessaria.</p>
+            `;
+            showToast('Soluzioni verificate correttamente!', 'success');
+        }
+
+        elements.solutionReviewResult.innerHTML = htmlRisultato;
         elements.solutionReviewResult.classList.remove('hidden');
 
-        showToast('Verifica completata!', 'success');
     } catch (error) {
         console.error('Errore revisione soluzioni:', error);
+
+        elements.solutionReviewResult.innerHTML = `
+            <h4>❌ Errore nella revisione</h4>
+            <p>${error.message}</p>
+            <p class="hint">Prova a cliccare di nuovo il pulsante.</p>
+        `;
+        elements.solutionReviewResult.classList.remove('hidden');
         showToast(`Errore: ${error.message}`, 'error');
     } finally {
         hideLoading();
@@ -619,6 +739,9 @@ async function handleStartGrading() {
             nomeCompleto
         );
 
+        // Salva anche le immagini originali per eventuale rivalutazione
+        risultato.immaginiOriginali = allImages;
+
         // Aggiungi ai risultati
         currentRisultati.push(risultato);
 
@@ -657,7 +780,7 @@ function handleNextStudent() {
     showToast('Pronto per correggere un altro studente', 'info');
 }
 
-// Funzione per chiedere a Gemini di rivedere i calcoli
+// Funzione per chiedere a Gemini di rivedere la correzione
 async function handleReviewCalcs() {
     if (!currentApiKey) {
         showToast('Inserisci prima la API Key Gemini', 'error');
@@ -669,52 +792,224 @@ async function handleReviewCalcs() {
         return;
     }
 
-    const notes = elements.reviewNotes.value.trim();
-    const ultimoRisultato = currentRisultati[currentRisultati.length - 1];
+    // Ottieni lo studente selezionato
+    const selectedIndex = elements.studenteSelect ? parseInt(elements.studenteSelect.value) : -1;
 
-    showLoading('Revisione calcoli in corso...');
+    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= currentRisultati.length) {
+        showToast('Seleziona uno studente da verificare', 'error');
+        return;
+    }
+
+    const risultatoStudente = currentRisultati[selectedIndex];
+    const nomeStudente = risultatoStudente.studente;
+    const notes = elements.reviewNotes.value.trim();
+
+    showLoading(`Verifica correzione di ${nomeStudente}...`);
 
     try {
         const prompt = `Sei un professore esperto di ${currentMateria}.
-Hai appena corretto un compito e il tuo collega ti chiede di rivedere la correzione.
+Hai corretto il compito dello studente "${nomeStudente}" e ora devi rivedere la tua correzione.
 
-CORREZIONE EFFETTUATA:
-${JSON.stringify(ultimoRisultato, null, 2)}
+SOLUZIONI DI RIFERIMENTO:
+${JSON.stringify(currentSoluzioni, null, 2)}
 
-${notes ? `NOTE DEL COLLEGA: ${notes}` : 'Rivedi tutti i calcoli e le valutazioni.'}
+CORREZIONE EFFETTUATA PER ${nomeStudente.toUpperCase()}:
+${JSON.stringify(risultatoStudente, null, 2)}
 
-Analizza attentamente:
-1. I calcoli sono corretti?
-2. Il punteggio assegnato è giusto?
-3. Ci sono errori nella correzione?
+${notes ? `NOTE SPECIFICHE: ${notes}` : 'Rivedi tutti i punteggi e le valutazioni.'}
 
-Rispondi in modo chiaro e conciso, indicando eventuali errori e correzioni da apportare.`;
+ISTRUZIONI:
+1. Analizza attentamente la correzione effettuata
+2. Verifica che i punteggi assegnati siano corretti
+3. Se trovi errori, CORREGGI la valutazione
+4. Restituisci la correzione (corretta o confermata) in formato JSON
+
+IMPORTANTE: Rispondi SOLO con un JSON valido nel seguente formato:
+{
+  "studente": "${nomeStudente}",
+  "modifiche_effettuate": true/false,
+  "riepilogo": "Descrizione delle modifiche o conferma che tutto è corretto",
+  "dettaglio_modifiche": ["Modifica 1", "Modifica 2", ...] oppure [] se nessuna modifica,
+  "correzione_aggiornata": { ... la correzione nel formato originale, corretta se necessario ... }
+}
+
+Rispondi SOLO con il JSON, senza altri commenti.`;
 
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentApiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+                    generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
                 })
             }
         );
 
         const data = await response.json();
-        const reviewText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Nessuna risposta ricevuta';
+        console.log('Risposta API reviewCalcs:', JSON.stringify(data, null, 2));
 
-        // Mostra il risultato
-        elements.reviewResult.innerHTML = `
-            <h4>📝 Risultato Revisione:</h4>
-            <p>${reviewText.replace(/\n/g, '<br>')}</p>
-        `;
+        if (data.error) {
+            throw new Error(data.error.message || 'Errore API');
+        }
+
+        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        // Estrai il JSON dalla risposta
+        let jsonText = responseText.trim();
+        if (jsonText.startsWith('```json')) jsonText = jsonText.slice(7);
+        if (jsonText.startsWith('```')) jsonText = jsonText.slice(3);
+        if (jsonText.endsWith('```')) jsonText = jsonText.slice(0, -3);
+        jsonText = jsonText.trim();
+
+        const risultato = JSON.parse(jsonText);
+
+        // Aggiorna la correzione se sono state effettuate modifiche
+        if (risultato.modifiche_effettuate && risultato.correzione_aggiornata) {
+            currentRisultati[selectedIndex] = risultato.correzione_aggiornata;
+            // Aggiorna la visualizzazione
+            renderRisultati();
+        }
+
+        // Costruisci il messaggio di riepilogo
+        let htmlRisultato = `<h4>📝 Verifica Correzione: ${nomeStudente}</h4>`;
+
+        if (risultato.modifiche_effettuate) {
+            htmlRisultato += `
+                <div class="review-modified">
+                    <p><strong>⚠️ Correzione Modificata</strong></p>
+                    <p>${risultato.riepilogo}</p>
+                    <div class="modifiche-lista">
+                        <strong>Modifiche effettuate:</strong>
+                        <ul>
+                            ${risultato.dettaglio_modifiche.map(m => `<li>${m}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <p class="success-text">✅ La correzione è stata aggiornata automaticamente!</p>
+                </div>
+            `;
+            showToast(`Correzione di ${nomeStudente} aggiornata!`, 'warning');
+        } else {
+            htmlRisultato += `
+                <div class="review-confirmed">
+                    <p><strong>✅ Correzione Confermata</strong></p>
+                    <p>${risultato.riepilogo}</p>
+                    <p class="success-text">Nessuna modifica necessaria.</p>
+                </div>
+            `;
+            showToast(`Correzione di ${nomeStudente} verificata!`, 'success');
+        }
+
+        elements.reviewResult.innerHTML = htmlRisultato;
         elements.reviewResult.classList.remove('hidden');
 
-        showToast('Revisione completata!', 'success');
     } catch (error) {
-        console.error('Errore revisione:', error);
+        console.error('Errore verifica correzione:', error);
+
+        elements.reviewResult.innerHTML = `
+            <h4>❌ Errore nella verifica</h4>
+            <p>${error.message}</p>
+            <p class="hint">Prova a cliccare di nuovo il pulsante.</p>
+        `;
+        elements.reviewResult.classList.remove('hidden');
+        showToast(`Errore: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Funzione per rivalutare uno studente riscansionando le immagini originali
+async function handleReanalyzeFromImage() {
+    if (!currentApiKey) {
+        showToast('Inserisci prima la API Key Gemini', 'error');
+        return;
+    }
+
+    if (currentRisultati.length === 0) {
+        showToast('Non ci sono correzioni da rivalutare', 'error');
+        return;
+    }
+
+    // Ottieni lo studente selezionato
+    const selectedIndex = elements.studenteSelect ? parseInt(elements.studenteSelect.value) : -1;
+
+    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= currentRisultati.length) {
+        showToast('Seleziona uno studente da rivalutare', 'error');
+        return;
+    }
+
+    const risultatoStudente = currentRisultati[selectedIndex];
+    const nomeStudente = risultatoStudente.studente;
+
+    // Verifica che ci siano le immagini originali
+    if (!risultatoStudente.immaginiOriginali || risultatoStudente.immaginiOriginali.length === 0) {
+        showToast('Immagini originali non disponibili per questo studente', 'error');
+        return;
+    }
+
+    const notes = elements.reviewNotes.value.trim();
+
+    showLoading(`Rivalutazione da immagine di ${nomeStudente}...`);
+
+    try {
+        // Rianalizza le immagini originali
+        const nuovoRisultato = await analyzeStudentWork(
+            currentApiKey,
+            risultatoStudente.immaginiOriginali,
+            currentSoluzioni,
+            currentMateria,
+            nomeStudente
+        );
+
+        // Mantieni le immagini originali nel nuovo risultato
+        nuovoRisultato.immaginiOriginali = risultatoStudente.immaginiOriginali;
+
+        // Confronta i risultati per mostrare le differenze
+        const vecchioVoto = risultatoStudente.votoFinale;
+        const nuovoVoto = nuovoRisultato.votoFinale;
+        const differenzaVoto = nuovoVoto - vecchioVoto;
+
+        // Aggiorna il risultato
+        currentRisultati[selectedIndex] = nuovoRisultato;
+        renderRisultati();
+
+        // Mostra il riepilogo delle modifiche
+        let htmlRisultato = `<h4>📷 Rivalutazione da Immagine: ${nomeStudente}</h4>`;
+
+        if (Math.abs(differenzaVoto) > 0.1) {
+            htmlRisultato += `
+                <div class="review-modified">
+                    <p><strong>⚠️ Voto Modificato</strong></p>
+                    <p>Voto precedente: <strong>${vecchioVoto.toFixed(1)}</strong></p>
+                    <p>Nuovo voto: <strong>${nuovoVoto.toFixed(1)}</strong> (${differenzaVoto > 0 ? '+' : ''}${differenzaVoto.toFixed(1)})</p>
+                    <p class="success-text">✅ La correzione è stata aggiornata con la nuova analisi!</p>
+                </div>
+            `;
+            showToast(`Voto di ${nomeStudente} aggiornato: ${nuovoVoto.toFixed(1)}`, 'warning');
+        } else {
+            htmlRisultato += `
+                <div class="review-confirmed">
+                    <p><strong>✅ Correzione Confermata</strong></p>
+                    <p>Voto: <strong>${nuovoVoto.toFixed(1)}</strong></p>
+                    <p class="success-text">La nuova analisi ha confermato la valutazione precedente.</p>
+                </div>
+            `;
+            showToast(`Correzione di ${nomeStudente} confermata!`, 'success');
+        }
+
+        elements.reviewResult.innerHTML = htmlRisultato;
+        elements.reviewResult.classList.remove('hidden');
+
+    } catch (error) {
+        console.error('Errore rivalutazione da immagine:', error);
+
+        elements.reviewResult.innerHTML = `
+            <h4>❌ Errore nella rivalutazione</h4>
+            <p>${error.message}</p>
+            <p class="hint">Prova a cliccare di nuovo il pulsante.</p>
+        `;
+        elements.reviewResult.classList.remove('hidden');
         showToast(`Errore: ${error.message}`, 'error');
     } finally {
         hideLoading();
@@ -722,9 +1017,89 @@ Rispondi in modo chiaro e conciso, indicando eventuali errori e correzioni da ap
 }
 
 function renderRisultati() {
+    // Genera HTML con ultimo risultato espanso, altri compressi
+    const totalResults = currentRisultati.length;
     elements.risultatiContainer.innerHTML = currentRisultati
-        .map(r => generateStudentResultHTML(r))
+        .map((r, index) => {
+            const isLast = index === totalResults - 1;
+            return generateStudentResultHTMLWithCollapse(r, isLast);
+        })
         .join('');
+
+    // Popola il dropdown per la selezione studente
+    updateStudentSelect();
+}
+
+// Genera HTML studente con supporto collapse
+function generateStudentResultHTMLWithCollapse(risultato, isExpanded = false) {
+    const voto = risultato.votoFinale;
+    const votoMax = risultato.votoMax || 10;
+    const percentuale = (voto / votoMax) * 100;
+
+    let gradeClass = 'high';
+    if (percentuale < 60) gradeClass = 'low';
+    else if (percentuale < 75) gradeClass = 'medium';
+
+    const collapsedClass = isExpanded ? '' : 'collapsed';
+    const bodyStyle = isExpanded ? '' : 'style="display: none;"';
+
+    // Genera contenuto interno usando la funzione esistente ma estraendo solo il body
+    const fullHTML = generateStudentResultHTML(risultato);
+    const bodyMatch = fullHTML.match(/<div class="result-card-body">([\s\S]*?)<\/div>\s*<\/div>\s*$/);
+    const bodyContent = bodyMatch ? bodyMatch[1] : '';
+
+    return `
+    <div class="result-card ${collapsedClass}" data-student="${risultato.studente}">
+      <div class="result-card-header" onclick="window.toggleResultCard(this)">
+        <span class="result-student-name">${risultato.studente}</span>
+        <div class="result-grade">
+          <span class="grade-value ${gradeClass}">${voto.toFixed(1)}</span>
+          <span class="grade-max">/ ${votoMax}</span>
+          <span class="collapse-icon">${isExpanded ? '▼' : '▶'}</span>
+        </div>
+      </div>
+      <div class="result-card-body" ${bodyStyle}>
+        ${bodyContent}
+      </div>
+    </div>
+  `;
+}
+
+// Funzione per toggle espansione/compressione
+window.toggleResultCard = function (headerElement) {
+    const card = headerElement.closest('.result-card');
+    const body = card.querySelector('.result-card-body');
+    const icon = card.querySelector('.collapse-icon');
+
+    if (card.classList.contains('collapsed')) {
+        card.classList.remove('collapsed');
+        body.style.display = 'block';
+        icon.textContent = '▼';
+    } else {
+        card.classList.add('collapsed');
+        body.style.display = 'none';
+        icon.textContent = '▶';
+    }
+};
+
+// Aggiorna dropdown selezione studente
+function updateStudentSelect() {
+    if (!elements.studenteSelect) return;
+
+    const currentValue = elements.studenteSelect.value;
+    elements.studenteSelect.innerHTML = '<option value="">-- Seleziona uno studente --</option>';
+
+    currentRisultati.forEach((r, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = r.studente;
+        elements.studenteSelect.appendChild(option);
+    });
+
+    // Seleziona l'ultimo studente aggiunto
+    if (currentRisultati.length > 0) {
+        elements.studenteSelect.value = currentRisultati.length - 1;
+    }
 }
 
 // =====================================================
