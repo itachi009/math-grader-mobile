@@ -1,0 +1,921 @@
+/**
+ * Math Grader - Main Application
+ * Logica principale dell'interfaccia utente
+ */
+
+import { generateSolutions, analyzeStudentWork, testApiKey } from './gemini-service.js';
+import { saveApiKey, getApiKey, saveCompito, getAllCompiti, deleteCompito, filterCompiti } from './storage-service.js';
+import { generateSolutionsHTML, generateStudentResultHTML, exportToPDF, renderMath } from './report-generator.js';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { captureTracciaPhoto, captureCompitiPhoto } from './capacitor-camera.js';
+
+// =====================================================
+// STATE
+// =====================================================
+let currentApiKey = '';
+let currentSoluzioni = null;
+let currentTraccia = '';
+let currentMateria = 'matematica';
+let currentTitolo = '';
+let uploadedCompiti = []; // Array di { file, imageData, studentName }
+let currentRisultati = [];
+
+// =====================================================
+// DOM ELEMENTS
+// =====================================================
+const elements = {
+    // API Key
+    apiKeyInput: document.getElementById('apiKey'),
+    toggleApiKeyBtn: document.getElementById('toggleApiKey'),
+    saveApiKeyBtn: document.getElementById('saveApiKey'),
+    apiStatus: document.getElementById('apiStatus'),
+
+    // Tabs
+    tabs: document.querySelectorAll('.tab'),
+    tabContents: document.querySelectorAll('.tab-content'),
+
+    // Step 1: Traccia
+    materiaSelect: document.getElementById('materiaSelect'),
+    titoloInput: document.getElementById('titoloCompito'),
+    tracciaText: document.getElementById('tracciaText'),
+    tracciaCameraInput: document.getElementById('tracciaCameraInput'),
+    tracciaImage: document.getElementById('tracciaImage'),
+    tracciaImagePreview: document.getElementById('tracciaImagePreview'),
+    generateSolutionsBtn: document.getElementById('generateSolutions'),
+
+    // Step 2: Soluzioni
+    stepSoluzioni: document.getElementById('step-soluzioni'),
+    soluzioniContainer: document.getElementById('soluzioniContainer'),
+    editSolutionsBtn: document.getElementById('editSolutions'),
+    proceedBtn: document.getElementById('proceedToGrading'),
+    solutionReviewNotes: document.getElementById('solutionReviewNotes'),
+    reviewSolutionsBtn: document.getElementById('reviewSolutions'),
+    solutionReviewResult: document.getElementById('solutionReviewResult'),
+
+    // Step 3: Compiti
+    stepCompiti: document.getElementById('step-compiti'),
+    studenteNome: document.getElementById('studenteNome'),
+    studenteCognome: document.getElementById('studenteCognome'),
+    compitiCameraInput: document.getElementById('compitiCameraInput'),
+    compitiImage: document.getElementById('compitiImage'),
+    compitiPreviewGrid: document.getElementById('compitiPreviewGrid'),
+    startGradingBtn: document.getElementById('startGrading'),
+
+    // Step 4: Risultati
+    stepRisultati: document.getElementById('step-risultati'),
+    risultatiContainer: document.getElementById('risultatiContainer'),
+    nextStudentBtn: document.getElementById('nextStudent'),
+    exportPdfBtn: document.getElementById('exportPdf'),
+    saveToHistoryBtn: document.getElementById('saveToHistory'),
+
+    // Revisione calcoli
+    reviewNotes: document.getElementById('reviewNotes'),
+    reviewCalcsBtn: document.getElementById('reviewCalcs'),
+    reviewResult: document.getElementById('reviewResult'),
+
+    // Storico
+    storicoList: document.getElementById('storicoList'),
+    filtroMateria: document.getElementById('filtroMateria'),
+    filtroData: document.getElementById('filtroData'),
+
+    // Loading
+    loadingOverlay: document.getElementById('loadingOverlay'),
+    loadingText: document.getElementById('loadingText'),
+
+    // Toast
+    toastContainer: document.getElementById('toastContainer'),
+
+    // Camera Modal
+    cameraModal: document.getElementById('cameraModal'),
+    cameraVideo: document.getElementById('cameraVideo'),
+    cameraCanvas: document.getElementById('cameraCanvas'),
+    closeCameraBtn: document.getElementById('closeCameraBtn'),
+    captureBtn: document.getElementById('captureBtn')
+};
+
+// =====================================================
+// INITIALIZATION
+// =====================================================
+function init() {
+    // Carica API Key salvata
+    const savedApiKey = getApiKey();
+    if (savedApiKey) {
+        currentApiKey = savedApiKey;
+        elements.apiKeyInput.value = savedApiKey;
+        elements.apiStatus.textContent = '✓ API Key salvata';
+        elements.apiStatus.className = 'api-status success';
+    }
+
+    // Event Listeners
+    setupEventListeners();
+
+    // Carica storico
+    renderStorico();
+}
+
+function setupEventListeners() {
+    // API Key
+    elements.toggleApiKeyBtn.addEventListener('click', toggleApiKeyVisibility);
+    elements.saveApiKeyBtn.addEventListener('click', handleSaveApiKey);
+    elements.apiKeyInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSaveApiKey();
+    });
+
+    // Tabs
+    elements.tabs.forEach(tab => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    // Step 1
+    elements.materiaSelect.addEventListener('change', () => {
+        currentMateria = elements.materiaSelect.value;
+    });
+    elements.titoloInput.addEventListener('input', () => {
+        currentTitolo = elements.titoloInput.value;
+    });
+    elements.tracciaText.addEventListener('input', () => {
+        currentTraccia = elements.tracciaText.value;
+    });
+
+    // Upload traccia - sia da camera che da galleria usano compressione
+    elements.tracciaCameraInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleTracciaUpload(e.target.files[0]);
+    });
+    elements.tracciaImage.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleTracciaUpload(e.target.files[0]);
+    });
+
+    elements.generateSolutionsBtn.addEventListener('click', handleGenerateSolutions);
+
+    // Step 2
+    elements.editSolutionsBtn.addEventListener('click', () => {
+        elements.stepSoluzioni.classList.add('hidden');
+        currentSoluzioni = null;
+    });
+    elements.proceedBtn.addEventListener('click', () => {
+        elements.stepCompiti.classList.remove('hidden');
+        elements.stepCompiti.scrollIntoView({ behavior: 'smooth' });
+    });
+    elements.reviewSolutionsBtn.addEventListener('click', handleReviewSolutions);
+
+    // Step 3 - sia da camera che da galleria usano compressione
+    elements.compitiCameraInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleCompitiUpload(e.target.files[0]);
+    });
+    elements.compitiImage.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleCompitiUpload(e.target.files[0]);
+    });
+    elements.studenteNome.addEventListener('input', updateGradingButton);
+    elements.studenteCognome.addEventListener('input', updateGradingButton);
+    elements.startGradingBtn.addEventListener('click', handleStartGrading);
+
+    // Step 4
+    elements.nextStudentBtn.addEventListener('click', handleNextStudent);
+    elements.exportPdfBtn.addEventListener('click', handleExportPdf);
+    elements.saveToHistoryBtn.addEventListener('click', handleSaveToHistory);
+    elements.reviewCalcsBtn.addEventListener('click', handleReviewCalcs);
+
+    // Storico
+    elements.filtroMateria.addEventListener('change', filterStorico);
+    elements.filtroData.addEventListener('change', filterStorico);
+}
+
+// =====================================================
+// TAB NAVIGATION
+// =====================================================
+function switchTab(tabId) {
+    elements.tabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabId);
+    });
+
+    elements.tabContents.forEach(content => {
+        content.classList.toggle('active', content.id === tabId);
+    });
+
+    if (tabId === 'storico') {
+        renderStorico();
+    }
+}
+
+// =====================================================
+// API KEY HANDLING
+// =====================================================
+function toggleApiKeyVisibility() {
+    const input = elements.apiKeyInput;
+    input.type = input.type === 'password' ? 'text' : 'password';
+    elements.toggleApiKeyBtn.textContent = input.type === 'password' ? '👁️' : '🙈';
+}
+
+async function handleSaveApiKey() {
+    const apiKey = elements.apiKeyInput.value.trim();
+
+    if (!apiKey) {
+        showToast('Inserisci una API Key valida', 'error');
+        return;
+    }
+
+    showLoading('Verifica API Key...');
+
+    const result = await testApiKey(apiKey);
+
+    hideLoading();
+
+    if (result.valid) {
+        currentApiKey = apiKey;
+        saveApiKey(apiKey);
+        elements.apiStatus.textContent = '✓ API Key valida e salvata';
+        elements.apiStatus.className = 'api-status success';
+        showToast('API Key salvata con successo!', 'success');
+    } else {
+        elements.apiStatus.textContent = '✗ API Key non valida';
+        elements.apiStatus.className = 'api-status error';
+        showToast(`Errore API: ${result.error || 'Verifica la tua API Key'}`, 'error');
+        console.error('Dettagli errore API:', result.error);
+    }
+}
+
+// =====================================================
+// FILE UPLOAD HANDLING
+// =====================================================
+function setupUploadZone(zone, input, handler, multiple = false) {
+    zone.addEventListener('click', () => input.click());
+
+    zone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zone.classList.add('dragover');
+    });
+
+    zone.addEventListener('dragleave', () => {
+        zone.classList.remove('dragover');
+    });
+
+    zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        if (files.length > 0) {
+            handler(multiple ? files : files[0]);
+        }
+    });
+
+    input.addEventListener('change', (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length > 0) {
+            handler(multiple ? files : files[0]);
+        }
+    });
+}
+
+// =====================================================
+// CAMERA FUNCTIONS (Low Resolution)
+// =====================================================
+let cameraStream = null;
+let currentCameraMode = 'traccia'; // 'traccia' o 'compiti'
+
+// Rendi le funzioni disponibili globalmente per i pulsanti HTML
+window.openCamera = async function (mode) {
+    currentCameraMode = mode || 'traccia';
+    try {
+        const constraints = {
+            video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 640 }, // Risoluzione bassa per evitare crash memoria
+                height: { ideal: 480 }
+            },
+            audio: false
+        };
+
+        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+        const video = document.getElementById('cameraVideo');
+        const modal = document.getElementById('cameraModal');
+
+        if (video) video.srcObject = cameraStream;
+        if (modal) modal.classList.remove('hidden');
+
+    } catch (error) {
+        console.error('Errore apertura camera:', error);
+        showToast('Errore apertura camera: ' + error.message, 'error');
+    }
+};
+
+window.closeCamera = function () {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+    const video = document.getElementById('cameraVideo');
+    const modal = document.getElementById('cameraModal');
+
+    if (video) video.srcObject = null;
+    if (modal) modal.classList.add('hidden');
+};
+
+async function capturePhoto() {
+    const video = document.getElementById('cameraVideo');
+    const canvas = document.getElementById('cameraCanvas');
+
+    if (!video || !canvas) return;
+
+    // Imposta dimensioni canvas conservative
+    canvas.width = 640;
+    canvas.height = 480;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async (blob) => {
+        if (!blob) {
+            showToast('Errore cattura frame', 'error');
+            window.closeCamera();
+            return;
+        }
+
+        const fileName = currentCameraMode === 'traccia' ? "traccia_camera.jpg" : "compito_camera.jpg";
+        const file = new File([blob], fileName, { type: "image/jpeg" });
+
+        window.closeCamera();
+
+        if (currentCameraMode === 'traccia') {
+            await handleTracciaUpload(file);
+        } else {
+            await handleCompitiUpload(file);
+        }
+
+    }, 'image/jpeg', 0.8);
+}
+
+// Bind manuale degli eventi camera se non gestiti da onclick
+const btnCapture = document.getElementById('captureBtn');
+if (btnCapture) btnCapture.addEventListener('click', capturePhoto);
+
+const btnCloseCam = document.getElementById('closeCameraBtn');
+if (btnCloseCam) btnCloseCam.addEventListener('click', window.closeCamera);
+
+// Opzioni di compressione AGGRESSIVE per browser-image-compression
+// Helper per leggere file
+const readFileAsDataURL = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
+
+async function handleTracciaUpload(file) {
+    showLoading('Caricamento traccia...');
+
+    try {
+        // Preview immediata
+        const previewUrl = URL.createObjectURL(file);
+        elements.tracciaImagePreview.innerHTML = `<img src="${previewUrl}" alt="Traccia">`;
+        elements.tracciaImagePreview.classList.remove('hidden');
+
+        // Conversione Base64 semplice
+        const dataUrl = await readFileAsDataURL(file);
+        const base64 = dataUrl.split(',')[1];
+
+        elements.tracciaImagePreview.dataset.base64 = base64;
+        showToast('Traccia caricata!', 'success');
+
+    } catch (error) {
+        console.error('Errore upload traccia:', error);
+        showToast('Errore nel caricamento: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+let currentStudentImages = [];
+
+async function handleCompitiUpload(file) {
+    showLoading('Caricamento foto...');
+
+    try {
+        // Preview immediata
+        const previewUrl = URL.createObjectURL(file);
+
+        // Conversione Base64 semplice
+        const dataUrl = await readFileAsDataURL(file);
+        const base64 = dataUrl.split(',')[1];
+
+        currentStudentImages.push({
+            imageData: previewUrl,
+            base64
+        });
+
+        renderCompitiPreview();
+        updateGradingButton();
+        showToast('Foto caricata!', 'success');
+    } catch (error) {
+        console.error('Errore upload:', error);
+        showToast('Errore nel caricamento: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+        elements.compitiImage.value = '';
+    }
+}
+
+
+
+function renderCompitiPreview() {
+    elements.compitiPreviewGrid.innerHTML = currentStudentImages.map((img, index) => `
+    <div class="compito-card" data-index="${index}">
+      <img src="${img.imageData}" alt="Pagina ${index + 1}">
+      <button class="compito-remove" onclick="window.removeCompito(${index})">×</button>
+      <div class="compito-card-info">
+        <span>Pagina ${index + 1}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Esposizione globale per gli handler inline
+window.removeCompito = (index) => {
+    currentStudentImages.splice(index, 1);
+    renderCompitiPreview();
+    updateGradingButton();
+};
+
+function updateGradingButton() {
+    const hasName = elements.studenteNome.value.trim() !== '' || elements.studenteCognome.value.trim() !== '';
+    const hasImages = currentStudentImages.length > 0;
+    elements.startGradingBtn.disabled = !(hasName && hasImages);
+}
+
+/**
+ * Comprime un'immagine ridimensionandola e riducendo la qualità
+ * @param {File} file - File immagine originale
+ * @param {number} maxWidth - Larghezza massima (default 1600px)
+ * @param {number} maxHeight - Altezza massima (default 1200px)
+ * @param {number} quality - Qualità JPEG 0-1 (default 0.8)
+ * @returns {Promise<string>} - Data URL dell'immagine compressa
+ */
+function compressImage(file, maxWidth = 1600, maxHeight = 1200, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const img = new Image();
+            img.onload = function () {
+                // Calcola dimensioni mantenendo aspect ratio
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth) {
+                    height = (height * maxWidth) / width;
+                    width = maxWidth;
+                }
+                if (height > maxHeight) {
+                    width = (width * maxHeight) / height;
+                    height = maxHeight;
+                }
+
+                // Crea canvas per ridimensionare
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Converti in JPEG compresso
+                const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve(compressedDataUrl);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+    });
+}
+
+// =====================================================
+// SOLUTION GENERATION
+// =====================================================
+async function handleGenerateSolutions() {
+    if (!currentApiKey) {
+        showToast('Inserisci prima la API Key Gemini', 'error');
+        return;
+    }
+
+    const traccia = elements.tracciaText.value.trim();
+    const tracciaImageBase64 = elements.tracciaImagePreview.dataset.base64 || null;
+
+    if (!traccia && !tracciaImageBase64) {
+        showToast('Inserisci la traccia del compito o carica un\'immagine', 'error');
+        return;
+    }
+
+    currentTraccia = traccia;
+    currentMateria = elements.materiaSelect.value;
+    currentTitolo = elements.titoloInput.value || `Compito di ${currentMateria}`;
+
+    showLoading('Generazione soluzioni con Gemini...');
+
+    try {
+        currentSoluzioni = await generateSolutions(
+            currentApiKey,
+            traccia,
+            currentMateria,
+            tracciaImageBase64
+        );
+
+        // Mostra le soluzioni
+        elements.soluzioniContainer.innerHTML = generateSolutionsHTML(currentSoluzioni);
+        elements.stepSoluzioni.classList.remove('hidden');
+        elements.stepSoluzioni.scrollIntoView({ behavior: 'smooth' });
+
+        showToast('Soluzioni generate con successo!', 'success');
+    } catch (error) {
+        console.error('Errore generazione soluzioni:', error);
+        showToast(`Errore: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Funzione per chiedere a Gemini di rivedere le soluzioni
+async function handleReviewSolutions() {
+    if (!currentApiKey) {
+        showToast('Inserisci prima la API Key Gemini', 'error');
+        return;
+    }
+
+    if (!currentSoluzioni) {
+        showToast('Non ci sono soluzioni da rivedere', 'error');
+        return;
+    }
+
+    const notes = elements.solutionReviewNotes.value.trim();
+
+    showLoading('Revisione soluzioni in corso...');
+
+    try {
+        const prompt = `Sei un professore esperto di ${currentMateria}.
+Hai generato queste soluzioni per un compito e ora devi verificare che siano corrette.
+
+TRACCIA:
+${currentTraccia}
+
+SOLUZIONI GENERATE:
+${JSON.stringify(currentSoluzioni, null, 2)}
+
+${notes ? `NOTE SPECIFICHE: ${notes}` : 'Rivedi tutti i calcoli e le soluzioni.'}
+
+Analizza attentamente:
+1. Tutti i calcoli sono corretti?
+2. Le soluzioni sono complete?
+3. Ci sono errori o imprecisioni?
+
+Rispondi in modo chiaro, indicando eventuali errori e le correzioni da apportare.
+Se tutto è corretto, conferma che le soluzioni sono verificate.`;
+
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentApiKey}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+                })
+            }
+        );
+
+        const data = await response.json();
+        const reviewText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Nessuna risposta ricevuta';
+
+        // Mostra il risultato
+        elements.solutionReviewResult.innerHTML = `
+            <h4>📝 Risultato Verifica:</h4>
+            <p>${reviewText.replace(/\n/g, '<br>')}</p>
+        `;
+        elements.solutionReviewResult.classList.remove('hidden');
+
+        showToast('Verifica completata!', 'success');
+    } catch (error) {
+        console.error('Errore revisione soluzioni:', error);
+        showToast(`Errore: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// =====================================================
+// GRADING
+// =====================================================
+async function handleStartGrading() {
+    if (!currentApiKey) {
+        showToast('Inserisci prima la API Key Gemini', 'error');
+        return;
+    }
+
+    if (!currentSoluzioni) {
+        showToast('Genera prima le soluzioni', 'error');
+        return;
+    }
+
+    // Ottieni nome e cognome
+    const nome = elements.studenteNome.value.trim();
+    const cognome = elements.studenteCognome.value.trim();
+    const nomeCompleto = `${cognome} ${nome}`.trim();
+
+    if (!nomeCompleto) {
+        showToast('Inserisci nome o cognome dello studente', 'error');
+        return;
+    }
+
+    if (currentStudentImages.length === 0) {
+        showToast('Carica almeno una foto del compito', 'error');
+        return;
+    }
+
+    showLoading(`Correzione compito di ${nomeCompleto} (${currentStudentImages.length} pagine)...`);
+
+    try {
+        // Raccogli tutte le immagini
+        const allImages = currentStudentImages.map(img => img.base64);
+
+        const risultato = await analyzeStudentWork(
+            currentApiKey,
+            allImages,
+            currentSoluzioni,
+            currentMateria,
+            nomeCompleto
+        );
+
+        // Aggiungi ai risultati
+        currentRisultati.push(risultato);
+
+        // Mostra i risultati
+        renderRisultati();
+        elements.stepRisultati.classList.remove('hidden');
+        elements.stepRisultati.scrollIntoView({ behavior: 'smooth' });
+
+        showToast(`Correzione completata per ${nomeCompleto}!`, 'success');
+    } catch (error) {
+        console.error('Errore correzione:', error);
+        showToast(`Errore: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Funzione per correggere un altro studente
+function handleNextStudent() {
+    // Resetta i campi studente
+    elements.studenteNome.value = '';
+    elements.studenteCognome.value = '';
+    currentStudentImages = [];
+
+    // Resetta l'interfaccia
+    renderCompitiPreview();
+    updateGradingButton();
+
+    // Resetta anche la sezione revisione
+    elements.reviewNotes.value = '';
+    elements.reviewResult.classList.add('hidden');
+
+    // Torna allo step 3
+    elements.stepCompiti.scrollIntoView({ behavior: 'smooth' });
+
+    showToast('Pronto per correggere un altro studente', 'info');
+}
+
+// Funzione per chiedere a Gemini di rivedere i calcoli
+async function handleReviewCalcs() {
+    if (!currentApiKey) {
+        showToast('Inserisci prima la API Key Gemini', 'error');
+        return;
+    }
+
+    if (currentRisultati.length === 0) {
+        showToast('Non ci sono correzioni da rivedere', 'error');
+        return;
+    }
+
+    const notes = elements.reviewNotes.value.trim();
+    const ultimoRisultato = currentRisultati[currentRisultati.length - 1];
+
+    showLoading('Revisione calcoli in corso...');
+
+    try {
+        const prompt = `Sei un professore esperto di ${currentMateria}.
+Hai appena corretto un compito e il tuo collega ti chiede di rivedere la correzione.
+
+CORREZIONE EFFETTUATA:
+${JSON.stringify(ultimoRisultato, null, 2)}
+
+${notes ? `NOTE DEL COLLEGA: ${notes}` : 'Rivedi tutti i calcoli e le valutazioni.'}
+
+Analizza attentamente:
+1. I calcoli sono corretti?
+2. Il punteggio assegnato è giusto?
+3. Ci sono errori nella correzione?
+
+Rispondi in modo chiaro e conciso, indicando eventuali errori e correzioni da apportare.`;
+
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentApiKey}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+                })
+            }
+        );
+
+        const data = await response.json();
+        const reviewText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Nessuna risposta ricevuta';
+
+        // Mostra il risultato
+        elements.reviewResult.innerHTML = `
+            <h4>📝 Risultato Revisione:</h4>
+            <p>${reviewText.replace(/\n/g, '<br>')}</p>
+        `;
+        elements.reviewResult.classList.remove('hidden');
+
+        showToast('Revisione completata!', 'success');
+    } catch (error) {
+        console.error('Errore revisione:', error);
+        showToast(`Errore: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function renderRisultati() {
+    elements.risultatiContainer.innerHTML = currentRisultati
+        .map(r => generateStudentResultHTML(r))
+        .join('');
+}
+
+// =====================================================
+// EXPORT & SAVE
+// =====================================================
+async function handleExportPdf() {
+    showLoading('Generazione PDF...');
+
+    try {
+        const filename = `${currentTitolo.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+        await exportToPDF(elements.risultatiContainer, filename);
+        showToast('PDF esportato con successo!', 'success');
+    } catch (error) {
+        console.error('Errore export PDF:', error);
+        showToast(`Errore export: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function handleSaveToHistory() {
+    const compito = {
+        titolo: currentTitolo,
+        materia: currentMateria,
+        traccia: currentTraccia,
+        soluzioni: currentSoluzioni,
+        risultati: currentRisultati,
+        numeroStudenti: currentRisultati.length,
+        mediaVoti: currentRisultati.reduce((sum, r) => sum + r.votoFinale, 0) / currentRisultati.length
+    };
+
+    saveCompito(compito);
+    showToast('Compito salvato nello storico!', 'success');
+
+    // Aggiorna lo storico se visibile
+    renderStorico();
+}
+
+// =====================================================
+// STORICO
+// =====================================================
+function renderStorico() {
+    const materia = elements.filtroMateria.value;
+    const data = elements.filtroData.value;
+
+    const compiti = filterCompiti(materia, data);
+
+    if (compiti.length === 0) {
+        elements.storicoList.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-icon">📭</span>
+        <p>Nessun compito trovato</p>
+      </div>
+    `;
+        return;
+    }
+
+    elements.storicoList.innerHTML = compiti.map(c => `
+    <div class="storico-item" data-id="${c.id}">
+      <div class="storico-item-info">
+        <h3>${c.titolo}</h3>
+        <div class="storico-item-meta">
+          <span>📚 ${c.materia.charAt(0).toUpperCase() + c.materia.slice(1)}</span>
+          <span>📅 ${new Date(c.dataCreazione).toLocaleDateString('it-IT')}</span>
+          <span>👥 ${c.numeroStudenti} studenti</span>
+          <span>📊 Media: ${c.mediaVoti.toFixed(1)}</span>
+        </div>
+      </div>
+      <div class="storico-item-actions">
+        <button class="btn-secondary btn-small" onclick="window.viewStorico('${c.id}')">
+          👁️ Visualizza
+        </button>
+        <button class="btn-icon" onclick="window.deleteStorico('${c.id}')" title="Elimina">
+          🗑️
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterStorico() {
+    renderStorico();
+}
+
+window.viewStorico = (id) => {
+    const compito = getAllCompiti().find(c => c.id === id);
+    if (!compito) return;
+
+    // Carica i dati del compito
+    currentTitolo = compito.titolo;
+    currentMateria = compito.materia;
+    currentTraccia = compito.traccia;
+    currentSoluzioni = compito.soluzioni;
+    currentRisultati = compito.risultati;
+
+    // Aggiorna UI
+    elements.titoloInput.value = currentTitolo;
+    elements.materiaSelect.value = currentMateria;
+    elements.tracciaText.value = currentTraccia;
+
+    // Mostra soluzioni e risultati
+    elements.soluzioniContainer.innerHTML = generateSolutionsHTML(currentSoluzioni);
+    elements.stepSoluzioni.classList.remove('hidden');
+
+    renderRisultati();
+    elements.stepRisultati.classList.remove('hidden');
+
+    // Switch to nuova-correzione tab
+    switchTab('nuova-correzione');
+
+    showToast('Compito caricato dallo storico', 'success');
+};
+
+window.deleteStorico = (id) => {
+    if (confirm('Sei sicuro di voler eliminare questo compito dallo storico?')) {
+        deleteCompito(id);
+        renderStorico();
+        showToast('Compito eliminato', 'success');
+    }
+};
+
+// =====================================================
+// UI HELPERS
+// =====================================================
+function showLoading(text = 'Caricamento...') {
+    elements.loadingText.textContent = text;
+    elements.loadingOverlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    elements.loadingOverlay.classList.add('hidden');
+}
+
+function showToast(message, type = 'info') {
+    const icons = {
+        success: '✓',
+        error: '✗',
+        warning: '⚠',
+        info: 'ℹ'
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+    <span class="toast-icon">${icons[type]}</span>
+    <span class="toast-message">${message}</span>
+  `;
+
+    elements.toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+// =====================================================
+// START
+// =====================================================
+init();

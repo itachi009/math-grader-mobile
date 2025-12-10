@@ -1,0 +1,5 @@
+{
+  "appId": "com.mathgrader.app",
+  "appName": "Math Grader",
+  "webDir": "dist"
+}

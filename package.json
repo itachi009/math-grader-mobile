@@ -1,0 +1,24 @@
+{
+  "name": "math-grader",
+  "private": true,
+  "version": "1.0.0",
+  "description": "App per correzione automatica compiti di matematica e fisica con Gemini AI",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/camera": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "html2pdf.js": "^0.10.1",
+    "katex": "^0.16.9"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

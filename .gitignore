@@ -1,0 +1,28 @@
+# Configurazione .gitignore per Capacitor
+
+# Build outputs
+dist/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# Node modules
+node_modules/
+
+# Capacitor
+android/app/build/
+android/.gradle/
+android/local.properties
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+.cache/

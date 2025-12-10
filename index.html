@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Math Grader - Correzione Automatica Compiti</title>
+  <meta name="description"
+    content="App per la correzione automatica di compiti di matematica e fisica usando Gemini AI">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <div class="logo">
+          <span class="logo-icon">📐</span>
+          <h1>Math Grader</h1>
+        </div>
+        <div class="api-key-section">
+          <div class="api-key-wrapper">
+            <input type="password" id="apiKey" placeholder="Inserisci API Key Gemini" autocomplete="off">
+            <button id="toggleApiKey" class="btn-icon" title="Mostra/Nascondi">👁️</button>
+            <button id="saveApiKey" class="btn-primary btn-small">Salva</button>
+          </div>
+          <span id="apiStatus" class="api-status"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Navigation Tabs -->
+      <nav class="tabs">
+        <button class="tab active" data-tab="nuova-correzione">
+          <span class="tab-icon">✏️</span>
+          Nuova Correzione
+        </button>
+        <button class="tab" data-tab="storico">
+          <span class="tab-icon">📚</span>
+          Storico Compiti
+        </button>
+      </nav>
+
+      <!-- Tab: Nuova Correzione -->
+      <section id="nuova-correzione" class="tab-content active">
+        <div class="workflow-container">
+          <!-- Step 1: Traccia -->
+          <div class="workflow-step" id="step-traccia">
+            <div class="step-header">
+              <span class="step-number">1</span>
+              <h2>Inserisci la Traccia del Compito</h2>
+            </div>
+            <div class="step-content">
+              <div class="input-group">
+                <label for="materiaSelect">Materia</label>
+                <select id="materiaSelect">
+                  <option value="matematica">Matematica</option>
+                  <option value="fisica">Fisica</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label for="titoloCompito">Titolo Compito</label>
+                <input type="text" id="titoloCompito" placeholder="es. Verifica Equazioni di Secondo Grado">
+              </div>
+              <div class="input-group">
+                <label for="tracciaText">Traccia</label>
+                <textarea id="tracciaText" rows="8" placeholder="Inserisci qui il testo della traccia con tutti gli esercizi...
+
+Esempio:
+Esercizio 1: Risolvi l'equazione 2x² - 5x + 2 = 0
+Esercizio 2: Un'auto percorre 150 km in 2 ore. Calcola la velocità media.
+Esercizio 3: Calcola l'area di un triangolo con base 8 cm e altezza 5 cm."></textarea>
+              </div>
+              <div class="upload-section">
+                <h3>📝 Carica un'immagine della traccia</h3>
+                <div class="upload-options">
+                  <input type="file" id="tracciaCameraInput" accept="image/*" capture="environment" hidden>
+                  <input type="file" id="tracciaImage" accept="image/*" hidden>
+                  <button type="button" class="btn-primary btn-full"
+                    onclick="document.getElementById('tracciaCameraInput').click()">
+                    <span class="btn-icon">📸</span>
+                    Scatta Foto
+                  </button>
+                  <button type="button" class="btn-secondary btn-full"
+                    onclick="document.getElementById('tracciaImage').click()">
+                    <span class="btn-icon">📁</span>
+                    Carica dalla Galleria
+                  </button>
+                </div>
+                <div id="tracciaImagePreview" class="image-preview hidden"></div>
+              </div>
+              <button id="generateSolutions" class="btn-primary btn-large">
+                <span class="btn-icon">🤖</span>
+                Genera Soluzioni con Gemini
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2: Soluzioni -->
+          <div class="workflow-step hidden" id="step-soluzioni">
+            <div class="step-header">
+              <span class="step-number">2</span>
+              <h2>Soluzioni Generate</h2>
+              <button id="editSolutions" class="btn-secondary btn-small">✏️ Modifica</button>
+            </div>
+            <div class="step-content">
+              <div id="soluzioniContainer" class="solutions-container">
+                <!-- Le soluzioni verranno inserite qui -->
+              </div>
+
+              <!-- Sezione Verifica Soluzioni -->
+              <div class="review-section">
+                <h3>🔍 Verifica Soluzioni</h3>
+                <p class="review-hint">Se vuoi che Gemini ricontrolli le soluzioni prima di procedere:</p>
+                <textarea id="solutionReviewNotes" rows="2"
+                  placeholder="es. Controlla l'esercizio 2, il risultato sembra sbagliato..."></textarea>
+                <button id="reviewSolutions" class="btn-secondary btn-full">
+                  <span class="btn-icon">🔄</span>
+                  Ricontrolla Soluzioni
+                </button>
+                <div id="solutionReviewResult" class="review-result hidden"></div>
+              </div>
+
+              <button id="proceedToGrading" class="btn-primary btn-large">
+                <span class="btn-icon">→</span>
+                Procedi alla Correzione
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 3: Correzione Studente -->
+          <div class="workflow-step hidden" id="step-compiti">
+            <div class="step-header">
+              <span class="step-number">3</span>
+              <h2>Correzione Compito Studente</h2>
+            </div>
+            <div class="step-content">
+              <!-- Anagrafica Studente -->
+              <div class="student-info-section">
+                <h3>👤 Dati Studente</h3>
+                <div class="student-fields">
+                  <div class="input-group">
+                    <label for="studenteNome">Nome</label>
+                    <input type="text" id="studenteNome" placeholder="es. Mario">
+                  </div>
+                  <div class="input-group">
+                    <label for="studenteCognome">Cognome</label>
+                    <input type="text" id="studenteCognome" placeholder="es. Rossi">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Upload Compito -->
+              <div class="upload-section">
+                <h3>📷 Foto del Compito</h3>
+                <div class="upload-options">
+                  <input type="file" id="compitiCameraInput" accept="image/*" capture="environment" hidden>
+                  <input type="file" id="compitiImage" accept="image/*" hidden>
+                  <button type="button" class="btn-primary btn-full"
+                    onclick="document.getElementById('compitiCameraInput').click()">
+                    <span class="btn-icon">📸</span>
+                    Scatta Foto
+                  </button>
+                  <button type="button" class="btn-secondary btn-full"
+                    onclick="document.getElementById('compitiImage').click()">
+                    <span class="btn-icon">📁</span>
+                    Carica dalla Galleria
+                  </button>
+                </div>
+
+                <div id="compitiPreviewGrid" class="compiti-grid">
+                  <!-- Preview delle pagine caricate -->
+                </div>
+              </div>
+
+              <button id="startGrading" class="btn-primary btn-large" disabled>
+                <span class="btn-icon">🎯</span>
+                Correggi Compito
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 4: Risultati -->
+          <div class="workflow-step hidden" id="step-risultati">
+            <div class="step-header">
+              <span class="step-number">4</span>
+              <h2>Risultati Correzione</h2>
+            </div>
+            <div class="step-content">
+              <!-- Pulsanti azioni -->
+              <div class="results-buttons">
+                <button id="nextStudent" class="btn-secondary btn-full">
+                  <span class="btn-icon">➕</span>
+                  Correggi altro studente
+                </button>
+                <button id="exportPdf" class="btn-secondary btn-full">
+                  <span class="btn-icon">📄</span>
+                  Esporta PDF
+                </button>
+                <button id="saveToHistory" class="btn-primary btn-full">
+                  <span class="btn-icon">💾</span>
+                  Salva nello Storico
+                </button>
+              </div>
+
+              <!-- Risultati correzione -->
+              <div id="risultatiContainer" class="results-container">
+                <!-- I risultati verranno inseriti qui -->
+              </div>
+
+              <!-- Sezione Revisione Calcoli -->
+              <div class="review-section">
+                <h3>🔍 Verifica Calcoli</h3>
+                <p class="review-hint">Se pensi che la correzione contenga errori, chiedi a Gemini di rivedere i
+                  calcoli:</p>
+                <textarea id="reviewNotes" rows="3"
+                  placeholder="es. Rivedi l'esercizio 2, il risultato sembra sbagliato..."></textarea>
+                <button id="reviewCalcs" class="btn-secondary btn-full">
+                  <span class="btn-icon">🔄</span>
+                  Chiedi Revisione a Gemini
+                </button>
+                <div id="reviewResult" class="review-result hidden"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab: Storico -->
+      <section id="storico" class="tab-content">
+        <div class="storico-header">
+          <h2>📚 Storico Compiti Corretti</h2>
+          <div class="storico-filters">
+            <select id="filtroMateria">
+              <option value="tutti">Tutte le Materie</option>
+              <option value="matematica">Matematica</option>
+              <option value="fisica">Fisica</option>
+            </select>
+            <input type="date" id="filtroData" placeholder="Filtra per data">
+          </div>
+        </div>
+        <div id="storicoList" class="storico-list">
+          <!-- Lista compiti salvati -->
+          <div class="empty-state">
+            <span class="empty-icon">📭</span>
+            <p>Nessun compito salvato nello storico</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+      <div class="loading-content">
+        <div class="spinner"></div>
+        <p id="loadingText">Elaborazione in corso...</p>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Camera Modal -->
+    <div id="cameraModal" class="camera-modal hidden">
+      <div class="camera-container">
+        <div class="camera-header">
+          <h3>📸 Scatta Foto</h3>
+          <button id="closeCameraBtn" class="btn-icon">✕</button>
+        </div>
+        <video id="cameraVideo" autoplay playsinline></video>
+        <canvas id="cameraCanvas" hidden></canvas>
+        <div class="camera-controls">
+          <button id="captureBtn" class="btn-primary btn-large">
+            <span class="btn-icon">📷</span>
+            Scatta
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+
+</html>
